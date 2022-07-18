@@ -1,23 +1,17 @@
 #pragma once
 
-#include <torch/torch.h>
 #include <memory>
-#include "fixed_size_hashmap.h"
+#include <c10/util/flat_hash_map.h>
+#include <torch/torch.h>
 
 namespace torchrec_mapper {
-
-struct FreeSlotRange {
-  int64_t start_;
-  int64_t end_;
-  std::unique_ptr<FreeSlotRange> next_;
-};
 
 struct Mapper {
   Mapper(int64_t num_embedding) :
     num_embedding_(num_embedding),
     global_id2cache_id_(2 * num_embedding),
     timestamps_(new int32_t[num_embedding]),
-    free_slot_list_(new FreeSlotRange{0, num_embedding, nullptr}) {
+    new_cache_id_(0) {
     TORCH_CHECK(num_embedding > 0);
   }
 
@@ -31,32 +25,30 @@ struct Mapper {
     int64_t *dst = cache_ids.template data_ptr<int64_t>();
     std::transform(src, src + n, dst,
                   [this, timestamp] (int64_t global_id) -> int64_t {
-                    if (free_slot_list_ == nullptr)
+                    if (new_cache_id_ == num_embedding_)
                       return -1;
-                    int64_t new_cache_id = free_slot_list_->start_;
-                    int64_t cache_id = global_id2cache_id_.find_or_set(global_id, new_cache_id);
-                    if (cache_id != -1) {
-                      timestamps_[cache_id] = timestamp;
-                      return cache_id;
+                    int64_t cache_id;
+                    auto found = global_id2cache_id_.find(global_id);
+                    if (found != global_id2cache_id_.end()) {
+                      cache_id = found->second;
                     } else {
-                        free_slot_list_->start_++;
-                        if (free_slot_list_->start_ == free_slot_list_->end_) {
-                          free_slot_list_.reset(free_slot_list_->next_.release());
-                        }
-                        timestamps_[new_cache_id] = timestamp;
-                        return new_cache_id;
+                      cache_id = new_cache_id_;
+                      global_id2cache_id_.emplace(global_id, cache_id);
+                      new_cache_id_++;
                     }
+                    timestamps_[cache_id] = timestamp;
+                    return cache_id;
                   });
-    if (free_slot_list_ == nullptr) {
+    if (new_cache_id_ == num_embedding_) {
       return false;
     }
     return true;
   }
 
   int64_t num_embedding_;
-  FixedSizeHashMap global_id2cache_id_;
+  ska::flat_hash_map<int64_t, int64_t> global_id2cache_id_;
   std::unique_ptr<int32_t[]> timestamps_;
-  std::unique_ptr<FreeSlotRange> free_slot_list_;
+  int64_t new_cache_id_;
 };
 
-};
+}
