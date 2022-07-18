@@ -16,4 +16,5 @@ if __name__ == "__main__":
     for timestamp in tqdm(range(200)):
         global_ids[:, :hot_size].random_(0, int(1e6))
         global_ids[:, hot_size:].random_(0, int(1e10))
-        succeed = mapper.map(global_ids, cache_ids, timestamp)
+        future = mapper.map(global_ids, cache_ids, timestamp)
+        future.wait()

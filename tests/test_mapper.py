@@ -33,7 +33,8 @@ if __name__ == "__main__":
 
     for timestamp in range(100):
         global_ids = torch.randint(100000000, 200000000, (batch_size, ))
-        succeed = mapper.map(global_ids, cache_ids, timestamp)
+        future = mapper.map(global_ids, cache_ids, timestamp)
+        succeed = future.wait()
         python_cache_ids = python_mapper.map(global_ids)
 
         if succeed:
