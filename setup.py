@@ -11,10 +11,7 @@ setup(name='torchrec_mapper',
               [
                   'src/bind.cpp',
               ],
-              extra_compile_args=[
-                  '-std=c++17',
-                  '-O2',
-              ],
+              extra_compile_args=['-std=c++17', '-O2', '-I/usr/local/include'],
           )
       ],
       cmdclass={'build_ext': cpp_extension.BuildExtension})

@@ -22,11 +22,15 @@ struct Future {
 };
 
 struct Mapper {
-  Mapper(int64_t num_embedding) :
+  Mapper(int64_t num_mappers, int64_t mapper_id,
+         int64_t start_cache_id, int64_t num_embedding) :
+    num_mappers_(num_mappers),
+    mapper_id_(mapper_id),
     num_embedding_(num_embedding),
-    global_id2cache_id_(2 * num_embedding),
+    new_cache_id_(start_cache_id),
+    start_cache_id_(start_cache_id),
+    last_cache_id_(start_cache_id + num_embedding),
     timestamps_(new int32_t[num_embedding]),
-    new_cache_id_(0),
     shutdown_(false) {
     TORCH_CHECK(num_embedding > 0);
     work_thread_ = std::thread([this] {
@@ -45,25 +49,30 @@ struct Mapper {
           dst = req.cache_ids_.template data_ptr<int64_t>();
           timestamp = req.timestamp_;
         }
-        std::transform(src, src + n, dst,
-                      [this, timestamp] (int64_t global_id) -> int64_t {
-                        if (new_cache_id_ == num_embedding_)
-                          return -1;
-                        int64_t cache_id;
-                        auto found = global_id2cache_id_.find(global_id);
-                        if (found != global_id2cache_id_.end()) {
-                          cache_id = found->second;
-                        } else {
-                          cache_id = new_cache_id_;
-                          global_id2cache_id_.emplace(global_id, cache_id);
-                          new_cache_id_++;
-                        }
-                        timestamps_[cache_id] = timestamp;
-                        return cache_id;
-                      });
+
+        for (int64_t i = 0; i < n; i++, src++, dst++) {
+          if (new_cache_id_ == last_cache_id_) {
+            break;
+          }
+          int64_t global_id = *src;
+          if (global_id % num_mappers_ != mapper_id_)
+            continue;
+          auto found = global_id2cache_id_.find(global_id);
+          if (found != global_id2cache_id_.end()) {
+            int64_t cache_id = found->second;
+            timestamps_[cache_id - start_cache_id_] = timestamp;
+            *dst = cache_id;
+          } else {
+            timestamps_[new_cache_id_ - start_cache_id_] = timestamp;
+            *dst = new_cache_id_;
+            global_id2cache_id_.emplace(global_id, new_cache_id_);
+            new_cache_id_++;
+          }
+        }
+
         {
           std::unique_lock lock(rep_mu_);
-          reps_.push(new_cache_id_ != num_embedding_);
+          reps_.push(new_cache_id_ != last_cache_id_);
         }
         rep_cv_.notify_one();
       }
@@ -77,10 +86,6 @@ struct Mapper {
   }
 
   Future Map(torch::Tensor global_ids, torch::Tensor cache_ids, int32_t timestamp) {
-    TORCH_CHECK(global_ids.is_cpu() && global_ids.scalar_type() == c10::kLong &&
-                global_ids.is_contiguous());
-    TORCH_CHECK(cache_ids.is_cpu() && cache_ids.scalar_type() == c10::kLong &&
-                cache_ids.is_contiguous());
     {
       std::unique_lock lock(req_mu_);
       reqs_.push(Request{global_ids, cache_ids, timestamp});
@@ -97,10 +102,16 @@ struct Mapper {
     });
   }
 
-  int64_t num_embedding_;
+  const int64_t num_mappers_;
+  const int64_t mapper_id_;
+
+  const int64_t num_embedding_;
+  int64_t new_cache_id_;
+  const int64_t start_cache_id_;
+  const int64_t last_cache_id_;
+
   ska::flat_hash_map<int64_t, int64_t> global_id2cache_id_;
   std::unique_ptr<int32_t[]> timestamps_;
-  int64_t new_cache_id_;
 
   std::thread work_thread_;
 
