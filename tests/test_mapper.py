@@ -21,11 +21,11 @@ class PythonMapper:
             gid = global_id_list[i]
             mapper_id = gid % self._num_mapper
             if gid in self.dict[mapper_id]:
-                cid = self.dict[gid]
+                cid = self.dict[mapper_id][gid]
             else:
                 cid = len(self.dict[mapper_id]) + self._mapper_start[mapper_id]
                 self.dict[mapper_id][gid] = cid
-                if len(self.dict[mapper_id]) > self._mapper_start[
+                if len(self.dict[mapper_id]) >= self._mapper_start[
                         mapper_id + 1] - self._mapper_start[mapper_id]:
                     self.overflow = True
             cache_id_list[i] = cid
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     batch_size = 16
 
     for timestamp in range(100):
-        global_ids = torch.randint(100000000, 200000000, (batch_size, ))
+        global_ids = torch.randint(2048, 4096, (batch_size, ))
         cache_ids = torch.empty_like(global_ids)
         future = mapper.map(global_ids, cache_ids, timestamp)
         succeed = future.wait()
@@ -51,4 +51,5 @@ if __name__ == "__main__":
             assert torch.all(python_cache_ids == cache_ids)
         else:
             assert python_mapper.overflow, f"python_mapper size: {len(python_mapper.dict)}"
+            print(f"overflow on timestamp: {timestamp}")
             break

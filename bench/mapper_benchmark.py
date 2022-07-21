@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 if __name__ == "__main__":
     num_embedding = int(3e8)
-    mapper = Mapper(num_embedding, 1)
+    mapper = Mapper(num_embedding, 4)
 
     hot_percentage = 0.8
     total_size = 1024
